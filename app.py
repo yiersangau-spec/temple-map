@@ -55,7 +55,10 @@ def save_temples(data, sha=None):
         payload['sha'] = sha
     try:
         r = requests.put(url, headers=gh_headers(), json=payload, timeout=10)
-        return r.status_code in (200, 201)
+        if r.status_code not in (200, 201):
+            print(f'GitHub write failed: {r.status_code} {r.text[:200]}')
+            return False
+        return True
     except Exception as e:
         print(f'GitHub write error: {e}')
         return False
@@ -166,7 +169,9 @@ def api_add():
             return jsonify({'error': f'「{name}」已存在'}), 409
 
     data.append({'name': name, 'lat': lat, 'lng': lng, 'visits': visits, 'notes': notes})
-    save_temples(data, sha)
+    ok = save_temples(data, sha)
+    if not ok:
+        return jsonify({'error': '儲存失敗，請確認 Render 環境變數設定正確'}), 500
     return jsonify({'ok': True, 'lat': lat, 'lng': lng})
 
 
@@ -199,6 +204,15 @@ def api_delete():
 
     save_temples(new_data, sha)
     return jsonify({'ok': True})
+
+
+@app.route('/api/debug')
+def api_debug():
+    return jsonify({
+        'github_token_set': bool(GITHUB_TOKEN),
+        'github_repo': GITHUB_REPO or '(not set)',
+        'token_prefix': GITHUB_TOKEN[:8] + '...' if GITHUB_TOKEN else '(empty)',
+    })
 
 
 if __name__ == '__main__':
