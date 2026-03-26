@@ -80,10 +80,10 @@ def _save_local(data):
 
 def extract_coords(url: str):
     """從 Google Maps URL 擷取座標，回傳 (lat, lng) 或 (None, None)"""
-    # 追蹤短網址
+    # 追蹤短網址（用 GET 才能正確追蹤 maps.app.goo.gl）
     if 'goo.gl' in url or 'maps.app.goo.gl' in url:
         try:
-            r = requests.head(url, allow_redirects=True, timeout=10)
+            r = requests.get(url, allow_redirects=True, timeout=10)
             url = r.url
         except Exception:
             pass
@@ -141,9 +141,6 @@ def api_temples():
 @app.route('/api/add', methods=['POST'])
 def api_add():
     body = request.json or {}
-    if body.get('password') != EDIT_PASSWORD:
-        return jsonify({'error': '密碼錯誤'}), 403
-
     name     = body.get('name', '').strip()
     gmaps    = body.get('gmaps', '').strip()
     notes    = body.get('notes', '').strip()
@@ -176,9 +173,6 @@ def api_add():
 @app.route('/api/visit', methods=['POST'])
 def api_visit():
     body = request.json or {}
-    if body.get('password') != EDIT_PASSWORD:
-        return jsonify({'error': '密碼錯誤'}), 403
-
     name = body.get('name', '').strip()
     result = load_temples()
     data, sha = result if isinstance(result, tuple) else (result, None)
@@ -195,9 +189,6 @@ def api_visit():
 @app.route('/api/delete', methods=['POST'])
 def api_delete():
     body = request.json or {}
-    if body.get('password') != EDIT_PASSWORD:
-        return jsonify({'error': '密碼錯誤'}), 403
-
     name = body.get('name', '').strip()
     result = load_temples()
     data, sha = result if isinstance(result, tuple) else (result, None)
