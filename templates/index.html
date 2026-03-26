@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏮 宮廟足跡地圖</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans TC', sans-serif; background: #1a1a2e; color: #eee; height: 100vh; display: flex; flex-direction: column; }
+
+  #header {
+    background: rgba(26,26,46,0.95);
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #333;
+    z-index: 1000;
+  }
+  #header h1 { font-size: 18px; color: #fff; }
+  #header .count { font-size: 13px; color: #aaa; margin-left: 10px; }
+
+  #map { flex: 1; }
+
+  /* 側邊面板 */
+  #panel {
+    position: fixed;
+    top: 52px;
+    right: 0;
+    width: 320px;
+    height: calc(100vh - 52px);
+    background: rgba(22,33,62,0.97);
+    border-left: 1px solid #333;
+    overflow-y: auto;
+    z-index: 999;
+    transform: translateX(100%);
+    transition: transform 0.3s;
+    padding: 16px;
+  }
+  #panel.open { transform: translateX(0); }
+
+  #panel h2 { font-size: 14px; color: #ccc; margin-bottom: 12px; }
+  #panel input, #panel textarea {
+    width: 100%;
+    background: #0d1b3e;
+    border: 1px solid #334;
+    border-radius: 6px;
+    color: #eee;
+    padding: 8px 10px;
+    font-size: 13px;
+    margin-bottom: 8px;
+    font-family: inherit;
+  }
+  #panel textarea { height: 60px; resize: none; }
+  .btn {
+    display: inline-block;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: bold;
+  }
+  .btn-primary { background: #c0392b; color: #fff; width: 100%; }
+  .btn-icon { background: rgba(255,255,255,0.1); color: #fff; padding: 6px 12px; }
+  .btn-icon:hover { background: rgba(255,255,255,0.2); }
+  #msg { font-size: 12px; margin-top: 8px; min-height: 18px; }
+  #msg.ok { color: #2ecc71; }
+  #msg.err { color: #e74c3c; }
+
+  #toggle-panel {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #c0392b;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 52px;
+    height: 52px;
+    font-size: 22px;
+    cursor: pointer;
+    z-index: 1000;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+
+  .sep { border: none; border-top: 1px solid #334; margin: 14px 0; }
+
+  /* 廟清單 */
+  #temple-list { margin-top: 4px; }
+  .temple-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #223;
+    font-size: 13px;
+  }
+  .temple-item .name { flex: 1; color: #ddd; }
+  .temple-item .visits {
+    background: #c0392b;
+    color: #fff;
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 11px;
+    margin: 0 6px;
+  }
+  .temple-item .actions button {
+    background: none;
+    border: none;
+    color: #aaa;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 3px;
+  }
+  .temple-item .actions button:hover { color: #fff; }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <div>
+    <span>🏮 宮廟足跡地圖</span>
+    <span class="count" id="count-text">載入中...</span>
+  </div>
+  <div>
+    <button class="btn btn-icon" onclick="refreshMap()">重新整理</button>
+  </div>
+</div>
+
+<div id="map"></div>
+
+<!-- 浮動按鈕 -->
+<button id="toggle-panel" onclick="togglePanel()" title="編輯">✏️</button>
+
+<!-- 側邊面板 -->
+<div id="panel">
+  <h2>➕ 新增宮廟</h2>
+  <input type="text" id="inp-name" placeholder="廟名（必填）">
+  <input type="text" id="inp-gmaps" placeholder="Google Maps 連結（貼上即可）">
+  <input type="number" id="inp-visits" placeholder="到訪次數（預設 1）" min="1" value="1">
+  <textarea id="inp-notes" placeholder="備註（選填）"></textarea>
+  <input type="password" id="inp-pw-add" placeholder="編輯密碼">
+  <button class="btn btn-primary" onclick="addTemple()">新增</button>
+  <div id="msg"></div>
+
+  <hr class="sep">
+  <h2>📋 所有宮廟</h2>
+  <div id="temple-list">載入中...</div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map = L.map('map', { zoomControl: true }).setView([23.97, 120.97], 8);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+  maxZoom: 19
+}).addTo(map);
+
+let temples = [];
+let markers = [];
+
+function radius(visits) { return Math.min(8 + (visits - 1) * 4, 40); }
+function opacity(visits) { return Math.min(0.4 + visits * 0.1, 0.9); }
+
+function renderMarkers() {
+  markers.forEach(m => m.remove());
+  markers = [];
+  temples.forEach(t => {
+    const v = t.visits || 1;
+    const circle = L.circleMarker([t.lat, t.lng], {
+      radius: radius(v),
+      color: '#c0392b',
+      weight: 2,
+      fillColor: '#e74c3c',
+      fillOpacity: opacity(v)
+    }).addTo(map);
+
+    const notes = t.notes ? `<br><span style="color:#aaa;font-size:12px;">${t.notes}</span>` : '';
+    circle.bindPopup(`
+      <div style="font-family:'Noto Sans TC',sans-serif;min-width:140px;">
+        <b style="font-size:14px;">🏮 ${t.name}</b><br>
+        <span style="color:#c0392b;font-size:15px;font-weight:bold;">到訪 ${v} 次</span>${notes}
+      </div>
+    `);
+    circle.bindTooltip(`🏮 ${t.name}（${v}次）`);
+    markers.push(circle);
+  });
+}
+
+function renderList() {
+  const list = document.getElementById('temple-list');
+  if (!temples.length) { list.innerHTML = '<div style="color:#666;font-size:13px;">尚無宮廟</div>'; return; }
+  const sorted = [...temples].sort((a, b) => (b.visits||1) - (a.visits||1));
+  list.innerHTML = sorted.map(t => `
+    <div class="temple-item">
+      <span class="name">${t.name}</span>
+      <span class="visits">${t.visits||1}次</span>
+      <span class="actions">
+        <button onclick="visitTemple('${t.name}')" title="再訪+1">＋</button>
+        <button onclick="deleteTemple('${t.name}')" title="刪除">🗑</button>
+      </span>
+    </div>
+  `).join('');
+}
+
+async function refreshMap() {
+  const res = await fetch('/api/temples');
+  temples = await res.json();
+  document.getElementById('count-text').textContent = `已到訪 ${temples.length} 間`;
+  renderMarkers();
+  renderList();
+}
+
+async function addTemple() {
+  const name   = document.getElementById('inp-name').value.trim();
+  const gmaps  = document.getElementById('inp-gmaps').value.trim();
+  const visits = parseInt(document.getElementById('inp-visits').value) || 1;
+  const notes  = document.getElementById('inp-notes').value.trim();
+  const pw     = document.getElementById('inp-pw-add').value;
+  const msg    = document.getElementById('msg');
+
+  if (!name) { showMsg('請填入廟名', 'err'); return; }
+
+  msg.textContent = '新增中...'; msg.className = '';
+  const res = await fetch('/api/add', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, gmaps, visits, notes, password: pw})
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showMsg(`✅ 「${name}」新增成功`, 'ok');
+    document.getElementById('inp-name').value = '';
+    document.getElementById('inp-gmaps').value = '';
+    document.getElementById('inp-notes').value = '';
+    document.getElementById('inp-visits').value = '1';
+    await refreshMap();
+    if (data.lat) map.setView([data.lat, data.lng], 14);
+  } else {
+    showMsg('❌ ' + (data.error || '新增失敗'), 'err');
+  }
+}
+
+async function visitTemple(name) {
+  const pw = prompt(`「${name}」再訪 +1，請輸入密碼：`);
+  if (!pw) return;
+  const res = await fetch('/api/visit', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, password: pw})
+  });
+  const data = await res.json();
+  if (data.ok) { await refreshMap(); }
+  else { alert('❌ ' + (data.error || '操作失敗')); }
+}
+
+async function deleteTemple(name) {
+  const pw = prompt(`確認刪除「${name}」，請輸入密碼：`);
+  if (!pw) return;
+  const res = await fetch('/api/delete', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({name, password: pw})
+  });
+  const data = await res.json();
+  if (data.ok) { await refreshMap(); }
+  else { alert('❌ ' + (data.error || '操作失敗')); }
+}
+
+function showMsg(text, type) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = type;
+}
+
+function togglePanel() {
+  document.getElementById('panel').classList.toggle('open');
+}
+
+refreshMap();
+</script>
+</body>
+</html>
